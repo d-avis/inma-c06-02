@@ -4,7 +4,7 @@ import argparse  # NEU: Importiere das Modul für Argumenten-Verarbeitung
 
 # --- Konfiguration ---
 # Dein API-Schlüssel von SerpApi
-SERPAPI_API_KEY = "1a7cd235016ea3e6bbe298eb4c89ad81257be21fdb74f9d2b887e64258a8cb74"
+SERPAPI_API_KEY = "<key>"
 
 # Basis-URL für die SerpApi Google Flights Engine
 SERPAPI_BASE_URL = "https://serpapi.com/search.json"
