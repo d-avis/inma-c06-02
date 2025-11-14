@@ -11,13 +11,70 @@ const PORT = process.env.PORT || 3000;
 // Body-Parser für JSON
 app.use(express.json());
 
+// Swagger
+const swaggerUi = require("swagger-ui-express");
+const swaggerJsdoc = require("swagger-jsdoc");
+
+// Swagger Setup
+const swaggerOptions = {
+  definition: {
+    openapi: "3.0.0",
+    info: {
+      title: "Ticketmaster API Wrapper",
+      version: "1.0.0",
+      description: "API-Dokumentation für Ticketmaster-Abfrage & Event-Datenbank"
+    }
+  },
+  apis: ["./server.js"] // liest JSDoc-Kommentare aus dieser Datei
+};
+
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+
+// Swagger UI Endpoint
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
 // Ticketmaster API-Key aus .env
 const TM_API_KEY = process.env.TM_API_KEY;
 
 // Basis-URL für Ticketmaster Discovery API
 const TM_URL = 'https://app.ticketmaster.com/discovery/v2/events.json';
 
-// Route: Events abfragen
+/**
+ * @openapi
+ * /events:
+ *   get:
+ *     summary: Holt Events direkt von Ticketmaster
+ *     tags:
+ *       - Ticketmaster
+ *     parameters:
+ *       - in: query
+ *         name: keyword
+ *         schema:
+ *           type: string
+ *         description: Keyword zur Eventsuche
+ *       - in: query
+ *         name: countryCode
+ *         schema:
+ *           type: string
+ *           default: DE
+ *         description: Ländercode (z. B. DE)
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *         description: Anzahl der Ergebnisse
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Seitenzahl (Pagination)
+ *     responses:
+ *       200:
+ *         description: Erfolgreich Ticketmaster-Events abgerufen
+ */
+
 app.get('/events', async (req, res) => {
   try {
     const { keyword, countryCode = "DE", size = 20, page = 0 } = req.query;
@@ -39,16 +96,49 @@ app.get('/events', async (req, res) => {
   }
 });
 
-// SEARCH-EVENT ENDPOINT
+/**
+ * @openapi
+ * /search-event:
+ *   get:
+ *     summary: Sucht Events bei Ticketmaster nach Name, Stadt oder Datum
+ *     tags:
+ *       - Ticketmaster
+ *     parameters:
+ *       - in: query
+ *         name: name
+ *         schema:
+ *           type: string
+ *         description: Event-Name oder Keyword
+ *       - in: query
+ *         name: city
+ *         schema:
+ *           type: string
+ *         description: Stadtname (z. B. Berlin)
+ *       - in: query
+ *         name: countryCode
+ *         schema:
+ *           type: string
+ *         description: Ländercode (z. B. DE)
+ *       - in: query
+ *         name: date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Datum im Format YYYY-MM-DD
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Anzahl der Ergebnisse
+ *     responses:
+ *       200:
+ *         description: Liste der gefundenen Events
+ */
+
 app.get('/search-event', async (req, res) => {
   try {
-    const {
-      name,          // Event-Name / Keyword
-      city,          // Stadt
-      countryCode,   // Länder-Code (z.B. DE)
-      date,          // Datum YYYY-MM-DD
-      size = 10
-    } = req.query;
+    const { name, city, countryCode, date, size = 10 } = req.query;
 
     const params = {
       apikey: TM_API_KEY,
@@ -59,7 +149,6 @@ app.get('/search-event', async (req, res) => {
     if (city) params.city = city;
     if (countryCode) params.countryCode = countryCode;
 
-    // Wenn ein Datum angegeben ist → formatieren für Ticketmaster
     if (date) {
       params.startDateTime = `${date}T00:00:00Z`;
       params.endDateTime = `${date}T23:59:59Z`;
@@ -67,7 +156,6 @@ app.get('/search-event', async (req, res) => {
 
     const response = await axios.get(TM_URL, { params });
 
-    // Keine Events gefunden
     if (!response.data._embedded) {
       return res.json({ message: "Keine Events gefunden." });
     }
@@ -85,6 +173,41 @@ app.get('/search-event', async (req, res) => {
   }
 });
 
+/**
+ * @openapi
+ * /events:
+ *   post:
+ *     summary: Speichert ein Event in der Datenbank
+ *     tags:
+ *       - Database
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - event_id
+ *               - name
+ *             properties:
+ *               event_id:
+ *                 type: string
+ *                 description: Ticketmaster Event-ID
+ *               name:
+ *                 type: string
+ *               date:
+ *                 type: string
+ *                 format: date
+ *               venue:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Event erfolgreich gespeichert
+ *       400:
+ *         description: Fehlende Pflichtfelder
+ *       500:
+ *         description: Fehler beim Speichern
+ */
 app.post("/events", async (req, res) => {
   try {
     const { event_id, name, date, venue } = req.body;
@@ -110,6 +233,49 @@ app.post("/events", async (req, res) => {
   }
 });
 
+
+/**
+ * @openapi
+ * /events/db:
+ *   get:
+ *     summary: Holt alle gespeicherten Events aus der Datenbank
+ *     description: Gibt alle Events zurück, die lokal in der MariaDB gespeichert wurden.
+ *     tags:
+ *       - Database
+ *     responses:
+ *       200:
+ *         description: Liste der gespeicherten Events
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 count:
+ *                   type: integer
+ *                   description: Anzahl der Events
+ *                 events:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         description: Datenbank-ID
+ *                       event_id:
+ *                         type: string
+ *                         description: Ticketmaster Event-ID
+ *                       name:
+ *                         type: string
+ *                       date:
+ *                         type: string
+ *                         description: Datum des Events
+ *                       venue:
+ *                         type: string
+ *                       created_at:
+ *                         type: string
+ *                         format: date-time
+ *                         description: Zeitpunkt der Speicherung
+ */
 app.get("/events/db", async (req, res) => {
   try {
     const sql = "SELECT * FROM events ORDER BY created_at DESC";
@@ -123,6 +289,90 @@ app.get("/events/db", async (req, res) => {
   } catch (err) {
     console.error("DB Select Error:", err.message);
     res.status(500).json({ error: "Fehler beim Abrufen der gespeicherten Events" });
+  }
+});
+
+/**
+ * @openapi
+ * /events/save-ticketmaster:
+ *   post:
+ *     summary: Ruft ein Ticketmaster-Event ab und speichert es in der Datenbank
+ *     tags:
+ *       - Database
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: string
+ *                 description: Ticketmaster Event-ID
+ *     responses:
+ *       200:
+ *         description: Event erfolgreich gespeichert
+ *       400:
+ *         description: Fehlende oder ungültige Event-ID
+ *       500:
+ *         description: Fehler beim Speichern oder Abrufen des Events
+ */
+app.post("/events/save-ticketmaster", async (req, res) => {
+  try {
+    const { id } = req.body;
+
+    if (!id) {
+      return res.status(400).json({ error: "Bitte eine Ticketmaster Event-ID angeben (id)" });
+    }
+
+    // Ticketmaster Event-URL
+    const url = `https://app.ticketmaster.com/discovery/v2/events/${id}.json`;
+
+    // Event von Ticketmaster abrufen
+    const response = await axios.get(url, {
+      params: {
+        apikey: TM_API_KEY
+      }
+    });
+
+    const data = response.data;
+
+    if (!data || !data.name) {
+      return res.status(400).json({ error: "Event nicht gefunden" });
+    }
+
+    // Event-Daten extrahieren
+    const name = data.name || null;
+    const date = data?.dates?.start?.localDate || null;
+    const venue = data?._embedded?.venues?.[0]?.name || null;
+
+    // Event in der MariaDB speichern
+    const sql = `
+      INSERT INTO events (event_id, name, date, venue)
+      VALUES (?, ?, ?, ?)
+    `;
+
+    await pool.execute(sql, [id, name, date, venue]);
+
+    res.json({
+      message: "Ticketmaster-Event erfolgreich gespeichert",
+      saved: {
+        event_id: id,
+        name,
+        date,
+        venue
+      }
+    });
+
+  } catch (err) {
+    console.error("Save Ticketmaster Event Error:", err.message);
+
+    res.status(500).json({
+      error: "Fehler beim Abrufen oder Speichern des Ticketmaster-Events",
+      details: err.message
+    });
   }
 });
 
