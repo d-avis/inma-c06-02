@@ -1,0 +1,17 @@
+services:
+  flight-service:
+    build: .
+    container_name: flight-service
+    image: flight-service:latest
+    stdin_open: true
+    tty: true
+    entrypoint: ["python", "callflightapi.py"]
+    command:
+      - "--departure_id"
+      - "FRA"
+      - "--arrival_id"
+      - "AUS"
+      - "--outbound_date"
+      - "2025-11-15"
+      - "--return_date"
+      - "2025-11-21"
