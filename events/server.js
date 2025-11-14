@@ -7,6 +7,8 @@ const pool = require("./db");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const crypto = require('crypto');
+
 
 // Body-Parser für JSON
 app.use(express.json());
@@ -306,9 +308,9 @@ app.get("/events/db", async (req, res) => {
 app.get("/hotels", async (req, res) => {
   try {
     const {
-      destination,      // Destination code (e.g., "PMI" for Palma de Mallorca)
-      checkIn,          // Check-in date YYYY-MM-DD
-      checkOut,         // Check-out date YYYY-MM-DD
+      destination,
+      checkIn,
+      checkOut,
       rooms = 1,
       adults = 1,
       children = 0
@@ -320,37 +322,82 @@ app.get("/hotels", async (req, res) => {
       });
     }
 
-    const payload = {
-      stay: {
-        checkIn,
-        checkOut
-      },
-      occupancies: [{
-        rooms: parseInt(rooms),
-        adults: parseInt(adults),
-        children: parseInt(children)
-      }],
-      destination: {
-        code: destination
-      }
+    const apiKey = HOTELBEDS_API_KEY || '';
+    const secret = HOTELBEDS_API_SECRET || '';
+    if (!apiKey || !secret) {
+      return res.status(500).json({ error: "Hotelbeds-Credentials nicht gesetzt" });
+    }
+
+    const timestamp = process.env.HOTELBEDS_TS_MS ? Date.now().toString() : Math.floor(Date.now() / 1000).toString();
+
+    const sigGenerators = {
+      'hmac:apiKey+timestamp': () => crypto.createHmac('sha256', secret).update(apiKey + timestamp).digest('hex'),
+      'hmac:timestamp+apiKey': () => crypto.createHmac('sha256', secret).update(timestamp + apiKey).digest('hex'),
+      'hmac:apiKey+secret+timestamp': () => crypto.createHmac('sha256', secret).update(apiKey + secret + timestamp).digest('hex'),
+      'sha256:secret+apiKey+timestamp': () => crypto.createHash('sha256').update(secret + apiKey + timestamp).digest('hex'),
+      'sha256:apiKey+secret+timestamp': () => crypto.createHash('sha256').update(apiKey + secret + timestamp).digest('hex'),
+      'sha256:secret+timestamp+apiKey': () => crypto.createHash('sha256').update(secret + timestamp + apiKey).digest('hex'),
     };
 
-    const response = await axios.post(HOTELBEDS_URL, payload, {
-      headers: {
-        'X-HB-ApiKey': HOTELBEDS_API_KEY,
-        'X-HB-ApiSecret': HOTELBEDS_API_SECRET,
-        'Content-Type': 'application/json'
-      }
-    });
+    // Auswahl: falls env gesetzt, nur diese Variante benutzen, sonst Reihenfolge wie definiert
+    const forced = process.env.HOTELBEDS_SIG_FORMAT;
+    const variants = forced ? [forced] : Object.keys(sigGenerators);
 
-    res.json({
-      count: response.data.hotels?.length || 0,
-      hotels: response.data.hotels || []
+    const payload = {
+      stay: { checkIn, checkOut },
+      occupancies: [{
+        rooms: parseInt(rooms, 10),
+        adults: parseInt(adults, 10),
+        children: parseInt(children, 10)
+      }],
+      destination: { code: destination }
+    };
+
+    let lastErr = null;
+    for (const fmt of variants) {
+      const signature = sigGenerators[fmt]();
+
+      const headers = {
+        // beide Varianten des Api-Key-Headers setzen (manche Envs erwarten X-HB-ApiKey)
+        'Api-key': apiKey,
+        'X-HB-ApiKey': apiKey,
+        // beide Varianten des Signature-Headers
+        'X-Signature': signature,
+        'X-HB-Signature': signature,
+        'X-Timestamp': timestamp,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      };
+
+      try {
+        console.log(`Trying Hotelbeds signature format: ${fmt}, timestamp=${timestamp}`);
+        const response = await axios.post(HOTELBEDS_URL, payload, { headers, timeout: 8000 });
+        // Erfolg
+        return res.json({
+          usedFormat: fmt,
+          count: response.data.hotels?.length || 0,
+          hotels: response.data.hotels || []
+        });
+      } catch (err) {
+        lastErr = err;
+        const status = err.response?.status;
+        // Bei 401 weiter probieren, sonst abbrechen und Fehler zurückgeben
+        console.warn(`Hotelbeds attempt ${fmt} failed: ${status || err.message}`);
+        if (status && status !== 401) break;
+        // sonst Loop weiter
+      }
+    }
+
+    // Alle Varianten schlugen fehl
+    console.error("All signature attempts failed");
+    res.status(401).json({
+      error: "Request signature verification failed (alle Versuche fehlgeschlagen)",
+      details: lastErr?.response?.data || lastErr?.message
     });
 
   } catch (err) {
     console.error("Hotelbeds API Error:", err.message);
-    res.status(500).json({ error: "Fehler bei der Hotel-Suche" });
+    res.status(500).json({ error: "Fehler bei der Hotel-Suche", details: err.message });
   }
 });
 
