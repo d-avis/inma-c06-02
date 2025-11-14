@@ -36,6 +36,16 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 // Ticketmaster API-Key aus .env
 const TM_API_KEY = process.env.TM_API_KEY;
 
+// Hotelbeds API Credentials
+const HOTELBEDS_API_KEY = process.env.HOTELBEDS_API_KEY;
+const HOTELBEDS_API_SECRET = process.env.HOTELBEDS_API_SECRET;
+const HOTELBEDS_URL = 'https://api.test.hotelbeds.com/hotel-api/1.0/hotels';
+
+// Debug: Check if credentials are loaded
+console.log("HOTELBEDS_API_KEY loaded:", !!HOTELBEDS_API_KEY);
+console.log("HOTELBEDS_API_SECRET loaded:", !!HOTELBEDS_API_SECRET);
+
+
 // Basis-URL für Ticketmaster Discovery API
 const TM_URL = 'https://app.ticketmaster.com/discovery/v2/events.json';
 
@@ -289,6 +299,58 @@ app.get("/events/db", async (req, res) => {
   } catch (err) {
     console.error("DB Select Error:", err.message);
     res.status(500).json({ error: "Fehler beim Abrufen der gespeicherten Events" });
+  }
+});
+
+// HOTEL SEARCH ENDPOINT
+app.get("/hotels", async (req, res) => {
+  try {
+    const {
+      destination,      // Destination code (e.g., "PMI" for Palma de Mallorca)
+      checkIn,          // Check-in date YYYY-MM-DD
+      checkOut,         // Check-out date YYYY-MM-DD
+      rooms = 1,
+      adults = 1,
+      children = 0
+    } = req.query;
+
+    if (!destination || !checkIn || !checkOut) {
+      return res.status(400).json({
+        error: "destination, checkIn, und checkOut sind Pflichtfelder"
+      });
+    }
+
+    const payload = {
+      stay: {
+        checkIn,
+        checkOut
+      },
+      occupancies: [{
+        rooms: parseInt(rooms),
+        adults: parseInt(adults),
+        children: parseInt(children)
+      }],
+      destination: {
+        code: destination
+      }
+    };
+
+    const response = await axios.post(HOTELBEDS_URL, payload, {
+      headers: {
+        'X-HB-ApiKey': HOTELBEDS_API_KEY,
+        'X-HB-ApiSecret': HOTELBEDS_API_SECRET,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    res.json({
+      count: response.data.hotels?.length || 0,
+      hotels: response.data.hotels || []
+    });
+
+  } catch (err) {
+    console.error("Hotelbeds API Error:", err.message);
+    res.status(500).json({ error: "Fehler bei der Hotel-Suche" });
   }
 });
 
