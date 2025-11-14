@@ -1,0 +1,31 @@
+services:
+  api:
+    build: .
+    container_name: ticketmaster-api
+    ports:
+      - "3000:3000"
+    environment:
+      TM_API_KEY: "${TM_API_KEY}"
+      DB_HOST: mariadb
+      DB_USER: root
+      DB_PASSWORD: ticketmaster
+      DB_NAME: ticketdb
+    depends_on:
+      - mariadb
+    restart: always
+
+
+  mariadb:
+    image: mariadb:12
+    container_name: ticketmaster-db
+    environment:
+      MARIADB_ROOT_PASSWORD: ticketmaster
+      MARIADB_DATABASE: ticketdb
+    ports:
+      - "3306:3306"
+    volumes:
+      - ticketmaster_mariadb:/var/lib/mysql
+
+    restart: always
+volumes:
+  ticketmaster_mariadb:

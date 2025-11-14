@@ -2,8 +2,14 @@ const express = require('express');
 const axios = require('axios');
 require('dotenv').config();
 
+// DB-Verbindung importieren
+const pool = require("./db");
+
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Body-Parser für JSON
+app.use(express.json());
 
 // Ticketmaster API-Key aus .env
 const TM_API_KEY = process.env.TM_API_KEY;
@@ -76,6 +82,47 @@ app.get('/search-event', async (req, res) => {
   } catch (err) {
     console.error("Search Event Error:", err.message);
     res.status(500).json({ error: "Fehler bei der Event-Suche" });
+  }
+});
+
+app.post("/events", async (req, res) => {
+  try {
+    const { event_id, name, date, venue } = req.body;
+
+    if (!event_id || !name) {
+      return res.status(400).json({
+        error: "event_id und name sind Pflichtfelder"
+      });
+    }
+
+    const sql = `
+      INSERT INTO events (event_id, name, date, venue)
+      VALUES (?, ?, ?, ?)
+    `;
+
+    await pool.execute(sql, [event_id, name, date, venue]);
+
+    res.json({ message: "Event erfolgreich gespeichert" });
+
+  } catch (err) {
+    console.error("DB Insert Error:", err.message);
+    res.status(500).json({ error: "Fehler beim Speichern des Events" });
+  }
+});
+
+app.get("/events/db", async (req, res) => {
+  try {
+    const sql = "SELECT * FROM events ORDER BY created_at DESC";
+    const [rows] = await pool.execute(sql);
+
+    res.json({
+      count: rows.length,
+      events: rows
+    });
+
+  } catch (err) {
+    console.error("DB Select Error:", err.message);
+    res.status(500).json({ error: "Fehler beim Abrufen der gespeicherten Events" });
   }
 });
 
